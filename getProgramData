@@ -1,0 +1,137 @@
+#!/usr/bin/perl --
+
+use strict;
+use LWP::UserAgent;
+use XML::Simple;
+use Encode;
+use Unicode::Japanese;
+use DBI;
+use utf8;
+
+my ($ua, $res, $cfg, $data);
+
+my $station_id = $ARGV[0];
+
+$ua = LWP::UserAgent->new;
+$ua->timeout(10);
+$ua->agent("mozilla/5.0 radiql/0.1");
+
+$res = $ua->get("http://radiko.jp/v2/api/program/station/today?station_id=$station_id");
+if (!$res->is_success) {
+	print "Station is not Found.\n";
+	exit 1;
+}
+
+my $d = 'DBI:mysql:radiko';# データソース
+my $u = 'root';# ユーザ名
+my $p = 'root';# パスワード
+
+# データベースへ接続
+my $dbh = DBI->connect($d, $u, $p, {'mysql_enable_utf8' => 1, 'on_connect_do' => ['SET NAMES utf8']});
+
+my ($values, $time, $sql, $sth, $temp);
+my ($title, $sub_title, $description, $performer, $infomation, $url);
+$data = XML::Simple->new(keyattr => [])->XMLin($res->content);
+foreach my $prog (@{$data->{"stations"}->{"station"}->{"scd"}->{"progs"}->{"prog"}}){
+	$time = sprintf("'%s','%s','%s','%s'", $prog->{"ft"}, $prog->{"ftl"}, $prog->{"tol"}, $prog->{"dur"});
+
+	$title = $prog->{"title"};
+	$title = encode('utf-8', $title);
+	$title = Unicode::Japanese->new($title)->z2h->get;
+	$title = Unicode::Japanese->new($title)->h2zKana->get;
+	$title =~ s/([\s]+)$//g;
+	$title = decode('utf-8', $title);
+
+	$infomation = $prog->{"info"};
+	$infomation = encode('utf-8', $infomation);
+	$infomation = Unicode::Japanese->new($infomation)->z2h->get;
+	$infomation = Unicode::Japanese->new($infomation)->h2zKana->get;
+	$infomation =~ s/([\s]+)$//g;
+	$infomation = decode('utf-8', $infomation);
+
+	$sub_title = $prog->{'sub_title'};
+	if(ref($sub_title) eq "HASH"){
+		if(keys %{$sub_title} == 0){
+			$sub_title = "";
+		}else{
+			$temp = "";
+			foreach my $value (@{$sub_title}){
+				$temp .= $value;
+			}
+			$sub_title = $temp;
+		}
+	}
+	$sub_title = encode('utf-8', $sub_title);
+	$sub_title = Unicode::Japanese->new($sub_title)->z2h->get;
+	$sub_title = Unicode::Japanese->new($sub_title)->h2zKana->get;
+	$sub_title =~ s/([\s]+)$//g;
+	$sub_title = decode('utf-8', $sub_title);
+
+	$description = $prog->{"desc"};
+	if(ref($description) eq "HASH"){
+		if(keys %{$description} == 0){
+			$description = "";
+		}else{
+			$temp = "";
+			foreach my $value (@{$description}){
+				$temp .= $value;
+			}
+			$description = $temp;
+		}
+	}
+	$description = encode('utf-8', $description);
+	$description = Unicode::Japanese->new($description)->z2h->get;
+	$description = Unicode::Japanese->new($description)->h2zKana->get;
+	$description =~ s/([\s]+)$//g;
+	$description = decode('utf-8', $description);
+
+	$performer = $prog->{"pfm"};
+	if(ref($performer) eq "HASH"){
+		if(keys %{$performer} == 0){
+			$performer = "";
+		}else{
+			$temp = "";
+			foreach my $value (@{$performer}){
+				$temp .= $value;
+			}
+			$performer = $temp;
+		}
+	}
+	$performer = encode('utf-8', $performer);
+	$performer = Unicode::Japanese->new($performer)->z2h->get;
+	$performer = Unicode::Japanese->new($performer)->h2zKana->get;
+	$performer =~ s/([\s]+)$//g;
+	$performer = decode('utf-8', $performer);
+
+	$url = $prog->{"url"};
+	if(ref($url) eq "HASH"){
+		if(keys %{$url} == 0){
+			$url = "";
+		}else{
+			$temp = "";
+			foreach my $value (@{$url}){
+				$temp .= $value;
+			}
+			$url = $temp;
+		}
+	}
+	$url = encode('utf-8', $url);
+	$url = Unicode::Japanese->new($url)->z2h->get;
+	$url = Unicode::Japanese->new($url)->h2zKana->get;
+	$url =~ s/([\s]+)$//g;
+	$url = decode('utf-8', $url);
+
+	$values = sprintf("'%s','%s','%s','%s','%s','%s','%s',%s", $station_id, $title, $sub_title, $description, $performer, $infomation, $url, $time);
+	$sql = "insert into program(station, title, sub_title, description, performer, infomation, url, fromtime, ftl, tol, dur)values($values);";
+	print "$sql\n";
+#	# SQL文を用意
+	$sth = $dbh->prepare($sql);
+#	# SQLを実行
+	$sth->execute;
+}
+
+# ステートメントハンドルオブジェクトを閉じる
+$sth->finish;
+# データベースハンドルオブジェクトを閉じる
+$dbh->disconnect;
+
